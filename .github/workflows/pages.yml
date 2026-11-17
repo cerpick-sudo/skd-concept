@@ -1,0 +1,88 @@
+name: Verify and publish SKD concept
+run-name: SKD concept ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release label
+        required: true
+        default: v8-review-20261117
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skd-concept-pages
+  cancel-in-progress: false
+
+jobs:
+  verify-build:
+    if: github.repository == 'cerpick-sudo/skd-concept' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install browser test dependency
+        run: npm install --no-save --ignore-scripts --package-lock=false playwright@1.62.1
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Test presentation under the project URL prefix
+        run: node tools/smoke.cjs
+      - name: Static checks and source integrity
+        run: |
+          node --check site/app.js
+          node --check tools/smoke.cjs
+          python3 tools/site.py check
+      - name: Build and verify the exact seven-file artifact
+        run: python3 tools/site.py build
+      - name: Stage verified Pages artifact
+        uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: _site
+          retention-days: 7
+      - name: Record release identity and artifact SHA-256
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib
+          artifact = pathlib.Path(os.environ['RUNNER_TEMP']) / 'artifact.tar'
+          digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+          lines = [
+              'Version: ' + os.environ['RELEASE_VERSION'],
+              'Commit SHA: ' + os.environ['GITHUB_SHA'],
+              'Run ID: ' + os.environ['GITHUB_RUN_ID'],
+              'Run attempt: ' + os.environ['GITHUB_RUN_ATTEMPT'],
+              'artifact.tar SHA-256: ' + digest,
+              'Site payload: seven verified files; reports are excluded.',
+          ]
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as report:
+              report.write('\n\n'.join(lines) + '\n')
+          print('artifact.tar SHA-256:', digest)
+          PY
+
+  publish:
+    needs: verify-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/configure-pages@v6.0.0
+      - name: Publish the verified artifact
+        id: deployment
+        uses: actions/deploy-pages@v5.0.1
+      - name: Download and compare every published file
+        run: python3 tools/site.py verify-http
