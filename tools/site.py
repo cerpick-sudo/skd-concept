@@ -67,7 +67,7 @@ def build():
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / 'site' / name, destination)
     verify_folder(stage)
-    print('PASS: build contains only the seven site files')
+    print(f'PASS: build contains exactly {len(FILES)} manifest-listed files')
 
 
 def verify_http():
@@ -86,7 +86,7 @@ def verify_http():
             except Exception as error:
                 failures.append(f'{name}: {error}')
         if not failures:
-            print('PASS: all seven published files downloaded and match SHA-256')
+            print(f'PASS: all {len(FILES)} published files downloaded and match SHA-256')
             return
         print(f'Propagation check {attempt}/18: ' + '; '.join(failures), flush=True)
         if attempt < 18:
